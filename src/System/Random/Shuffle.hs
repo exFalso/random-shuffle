@@ -11,16 +11,19 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module System.Random.Shuffle
-    (
-     shuffle
+    ( shuffle
     , shuffle'
+    , shuffleGen
     , shuffleM
+    , shuffleIO
     ) where
 
-import Data.Function (fix)
-import System.Random (RandomGen, randomR)
-import Control.Monad (liftM,liftM2)
+import Data.List            (foldl')
+import Control.Applicative  ((<$>))
+import Control.Monad        (liftM,liftM2)
 import Control.Monad.Random (MonadRandom, getRandomR)
+import Data.Function        (fix)
+import System.Random        (RandomGen, getStdGen, randomR)
 
 
 -- |A complete binary tree, of leaves and internal nodes.
@@ -109,23 +112,27 @@ shuffle elements = shuffleTree (buildTree elements)
           in b : (shuffleTree rest rs)
 
 
+-- |Given a sequence @(e1,...en)@ to shuffle and a random generator,
+-- compute the corresponding permutation of the input sequence.
+shuffleGen :: RandomGen gen => [a] -> gen -> ([a], gen)
+shuffleGen elements gen = (shuffle elements numseq, gen')
+    where
+      (numseq, gen') = rseq (length elements - 1) gen
+
+      -- |The sequence (r1,...r[n-1]) of numbers such that r[i] is an
+      -- independent sample from a uniform random distribution
+      -- [0..n-i]
+      rseq :: RandomGen gen => Int -> gen -> ([Int], gen)
+      rseq n g = foldl' rnum ([], g) [1..n]
+      rnum (l, g) i = let (j, g') = randomR (0, i) g
+                      in (j : l, g')
+
+{-# DEPRECATED shuffle' "shuffle' is deprecated, please use shuffleGen instead" #-}
 -- |Given a sequence @(e1,...en)@ to shuffle, its length, and a random
 -- generator, compute the corresponding permutation of the input
 -- sequence.
 shuffle' :: RandomGen gen => [a] -> Int -> gen -> [a]
-shuffle' elements len = shuffle elements . rseq len
-    where
-      -- |The sequence (r1,...r[n-1]) of numbers such that r[i] is an
-      -- independent sample from a uniform random distribution
-      -- [0..n-i]
-      rseq :: RandomGen gen => Int -> gen -> [Int]
-      rseq n = fst . unzip . rseq' (n - 1)
-          where
-            rseq' :: RandomGen gen => Int -> gen -> [(Int, gen)]
-            rseq' 0 _ = []
-            rseq' i gen = (j, gen) : rseq' (i - 1) gen'
-                where
-                  (j, gen') = randomR (0, i) gen
+shuffle' elements _ = fst . shuffleGen elements
 
 -- |shuffle' wrapped in a random monad
 shuffleM :: (MonadRandom m) => [a] -> m [a]
@@ -136,3 +143,7 @@ shuffleM elements
     rseqM :: (MonadRandom m) => Int -> m [Int]
     rseqM 0 = return []
     rseqM i = liftM2 (:) (getRandomR (0, i)) (rseqM (i - 1))
+
+-- |shuffleGen using the IO random generator
+shuffleIO :: [a] -> IO [a]
+shuffleIO elements = (fst . shuffleGen elements) <$> getStdGen
